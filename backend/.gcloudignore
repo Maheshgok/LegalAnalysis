@@ -1,0 +1,6 @@
+.git
+.gitignore
+gcp-credentials.json
+venv/
+__pycache__/
+.env

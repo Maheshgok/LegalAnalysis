@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+openai
+playwright
+python-multipart
+pydantic
+pydantic-settings
+google-cloud-vision
+google-cloud-aiplatform
+PyMuPDF
