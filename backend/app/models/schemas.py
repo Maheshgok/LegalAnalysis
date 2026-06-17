@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Dict, Any
 
 class InitialAnalysisResult(BaseModel):
     suggested_party_a: List[str] = Field(default=[], description="List of parties suggested for side A (e.g., Petitioners)")
@@ -33,3 +33,34 @@ class PrecedentRequest(BaseModel):
     phase_6: str = Field(..., description="The output from phase 6 to build upon")
     case_law_context: str = Field(..., description="User provided case law context")
     provider: str = Field("openai", description="The AI provider to use ('openai' or 'google')")
+
+class StrategyOption(BaseModel):
+    title: str = Field(..., description="Short title of the strategy (e.g., Aggressive Procedural Challenge)")
+    aim: str = Field(..., description="What this strategy aims to achieve")
+    supporting_facts: str = Field(..., description="The specific facts from the case that support this strategy")
+    description: str = Field(..., description="Detailed explanation of how to execute this strategy")
+
+class StrategyOptionsRequest(BaseModel):
+    phase_3: str = Field(..., description="Objective Formalization")
+    phase_4: str = Field(..., description="Regulatory Mapping")
+    phase_5: str = Field(..., description="Vulnerability Analysis")
+    representing_party: str = Field(..., description="The specific party the lawyer is representing")
+    provider: str = Field("openai", description="The AI provider to use")
+
+class StrategyOptionsResult(BaseModel):
+    options: List[StrategyOption] = Field(..., description="List of generated strategy options")
+
+class DraftWritRequest(BaseModel):
+    phase_3: str = Field(..., description="Objective Formalization")
+    phase_4: str = Field(..., description="Regulatory Mapping")
+    phase_6: str = Field(..., description="Adversarial Strategy")
+    phase_7: str = Field(..., description="Precedent Matching")
+    representing_party: str = Field(..., description="The specific party the lawyer is representing")
+    selected_strategy_text: str = Field(..., description="The chosen strategy + any manual modifications")
+    provider: str = Field("openai", description="The AI provider to use")
+
+class DraftWritResult(BaseModel):
+    statement_of_facts: str = Field(..., description="The drafted Statement of Facts")
+    grounds_for_challenge: str = Field(..., description="The drafted Grounds for Challenge")
+    the_prayer: str = Field(..., description="The drafted Prayer")
+

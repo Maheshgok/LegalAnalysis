@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 import logging
-from app.models.schemas import InitialAnalysisRequest, PrecedentRequest, StrategyAnalysisRequest
-from app.services.llm_service import run_initial_analysis, run_precedent_analysis, run_strategy_analysis
+from app.models.schemas import InitialAnalysisRequest, PrecedentRequest, StrategyAnalysisRequest, StrategyOptionsRequest, DraftWritRequest
+from app.services.llm_service import run_initial_analysis, run_precedent_analysis, run_strategy_analysis, run_strategy_options, run_draft_writ_petition
 
 router = APIRouter()
 
@@ -55,3 +55,36 @@ async def analyze_precedent(request: PrecedentRequest):
         logging.error(f"Precedent Analysis failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Precedent Analysis encountered an error: {str(e)}")
 
+@router.post("/strategy-options")
+async def analyze_strategy_options(request: StrategyOptionsRequest):
+    if not request.representing_party.strip():
+        raise HTTPException(status_code=400, detail="Representing party cannot be empty.")
+        
+    try:
+        result = await run_strategy_options(
+            request.phase_3, request.phase_4, request.phase_5,
+            request.representing_party, request.provider
+        )
+        return {"status": "success", "data": result.model_dump()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Strategy Options failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Strategy Options encountered an error: {str(e)}")
+
+@router.post("/draft")
+async def draft_writ_petition(request: DraftWritRequest):
+    if not request.representing_party.strip() or not request.selected_strategy_text.strip():
+        raise HTTPException(status_code=400, detail="Representing party and selected strategy text cannot be empty.")
+        
+    try:
+        result = await run_draft_writ_petition(
+            request.phase_3, request.phase_4, request.phase_6, request.phase_7,
+            request.representing_party, request.selected_strategy_text, request.provider
+        )
+        return {"status": "success", "data": result.model_dump()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Draft Writ failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Draft Writ encountered an error: {str(e)}")

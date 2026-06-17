@@ -18,6 +18,16 @@ export default function Home() {
   const [strategyResults, setStrategyResults] = useState<any>(null);
   const [finalResults, setFinalResults] = useState<any>(null);
   
+  // New States for Strategy Options and Drafting
+  const [representingParty, setRepresentingParty] = useState("");
+  const [strategyOptions, setStrategyOptions] = useState<any[]>([]);
+  const [selectedStrategyIndex, setSelectedStrategyIndex] = useState<number | null>(null);
+  const [customStrategyText, setCustomStrategyText] = useState("");
+  const [loadingStrategyOptions, setLoadingStrategyOptions] = useState(false);
+  
+  const [draftResults, setDraftResults] = useState<any>(null);
+  const [loadingDraft, setLoadingDraft] = useState(false);
+  
   // New States for Parties
   const [partyAEntities, setPartyAEntities] = useState<string[]>([]);
   const [partyBEntities, setPartyBEntities] = useState<string[]>([]);
@@ -238,6 +248,96 @@ export default function Home() {
     }
   };
 
+  const handleGenerateStrategies = async () => {
+    if (!strategyResults) {
+      setError("Please run the strategy analysis first.");
+      return;
+    }
+    if (!representingParty) {
+      setError("Please select the party you are representing.");
+      return;
+    }
+
+    setLoadingStrategyOptions(true);
+    setError(null);
+    setStrategyOptions([]);
+    setSelectedStrategyIndex(null);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/analysis/strategy-options`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phase_3: initialResults.phase_3,
+          phase_4: initialResults.phase_4,
+          phase_5: strategyResults.phase_5,
+          representing_party: representingParty,
+          provider: provider
+        }),
+      });
+      const data = await response.json();
+      if (response.ok && data.status === "success") {
+        setStrategyOptions(data.data.options || []);
+      } else {
+        throw new Error(data.detail || data.message || "An error occurred generating strategies.");
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to generate strategies.");
+    } finally {
+      setLoadingStrategyOptions(false);
+    }
+  };
+
+  const handleDraftWrit = async () => {
+    if (!finalResults) {
+      setError("Please run the precedent matching first.");
+      return;
+    }
+    if (selectedStrategyIndex === null && !customStrategyText.trim()) {
+      setError("Please select a strategy or provide a custom strategy.");
+      return;
+    }
+
+    setLoadingDraft(true);
+    setError(null);
+    setDraftResults(null);
+
+    let finalStrategy = "";
+    if (selectedStrategyIndex !== null) {
+      const opt = strategyOptions[selectedStrategyIndex];
+      finalStrategy += `[Chosen Base Strategy]: ${opt.title}\nAim: ${opt.aim}\nDescription: ${opt.description}\n\n`;
+    }
+    if (customStrategyText.trim()) {
+      finalStrategy += `[Custom Strategy Notes / Modifications]:\n${customStrategyText}\n`;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/analysis/draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phase_3: initialResults.phase_3,
+          phase_4: initialResults.phase_4,
+          phase_6: strategyResults.phase_6,
+          phase_7: finalResults.phase_7,
+          representing_party: representingParty,
+          selected_strategy_text: finalStrategy,
+          provider: provider
+        }),
+      });
+      const data = await response.json();
+      if (response.ok && data.status === "success") {
+        setDraftResults(data.data);
+      } else {
+        throw new Error(data.detail || data.message || "An error occurred drafting the writ.");
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to draft the writ petition.");
+    } finally {
+      setLoadingDraft(false);
+    }
+  };
+
   const handleDownloadPDF = () => {
     window.print();
   };
@@ -260,6 +360,12 @@ export default function Home() {
     }
     if (finalResults) {
       content += "<h2>Phase 7: Precedent Matching</h2><p>" + finalResults.phase_7.replace(/\n/g, "<br>") + "</p>";
+    }
+    if (draftResults) {
+      content += "<h1>Drafted Writ Petition</h1>";
+      content += "<h2>Statement of Facts</h2><p>" + draftResults.statement_of_facts.replace(/\n/g, "<br>") + "</p>";
+      content += "<h2>Grounds for Challenge</h2><p>" + draftResults.grounds_for_challenge.replace(/\n/g, "<br>") + "</p>";
+      content += "<h2>The Prayer</h2><p>" + draftResults.the_prayer.replace(/\n/g, "<br>") + "</p>";
     }
     
     const html = header + content + footer;
@@ -604,6 +710,124 @@ export default function Home() {
             <div style={{ whiteSpace: "pre-wrap", color: "var(--text-primary)", lineHeight: "1.6" }}>
               {finalResults.phase_7}
             </div>
+          </div>
+        </section>
+      )}
+
+      {/* Step 4: Strategy Selection */}
+      {finalResults && (
+        <section className="card no-print" style={{ textAlign: "center", padding: "3rem", marginBottom: "2rem", border: "2px solid var(--warning)" }}>
+          <h2 style={{ marginBottom: "1.5rem" }}>Step 4: Formulate Legal Strategy</h2>
+          <p style={{ color: "var(--text-secondary)", marginBottom: "1.5rem", fontSize: "1rem" }}>
+            Select the party you are representing, and the AI will propose tailored aggressive and defensive strategies.
+          </p>
+          
+          <div style={{ marginBottom: "2rem", display: "inline-block", textAlign: "left" }}>
+            <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: "bold" }}>Who are you representing?</label>
+            <select 
+              value={representingParty}
+              onChange={(e) => setRepresentingParty(e.target.value)}
+              style={{ width: "100%", minWidth: "300px", padding: "0.75rem", borderRadius: "4px", backgroundColor: "var(--bg-color)", color: "var(--text-primary)", border: "1px solid var(--border-color)" }}
+            >
+              <option value="">-- Select a Party --</option>
+              {partyAEntities.map((e, i) => <option key={`A-${i}`} value={e}>{e}</option>)}
+              {partyBEntities.map((e, i) => <option key={`B-${i}`} value={e}>{e}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <button 
+              onClick={handleGenerateStrategies} 
+              disabled={loadingStrategyOptions || !representingParty}
+              className="btn" 
+              style={{ padding: "0.75rem 2rem", fontSize: "1.1rem", backgroundColor: "var(--warning)", color: "#000", opacity: (loadingStrategyOptions || !representingParty) ? 0.5 : 1 }}
+            >
+              {loadingStrategyOptions ? "Proposing Strategies..." : "Propose Strategies"}
+            </button>
+          </div>
+
+          {strategyOptions.length > 0 && (
+            <div style={{ marginTop: "2rem", textAlign: "left" }}>
+              <h3 style={{ marginBottom: "1rem", color: "var(--warning)" }}>Select a Strategy</h3>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "1rem" }}>
+                {strategyOptions.map((opt, idx) => (
+                  <div 
+                    key={idx} 
+                    onClick={() => setSelectedStrategyIndex(idx)}
+                    style={{ 
+                      padding: "1.5rem", 
+                      borderRadius: "8px", 
+                      border: selectedStrategyIndex === idx ? "2px solid var(--warning)" : "1px solid var(--border-color)", 
+                      backgroundColor: selectedStrategyIndex === idx ? "rgba(234, 179, 8, 0.1)" : "rgba(255,255,255,0.02)",
+                      cursor: "pointer",
+                      transition: "all 0.2s"
+                    }}
+                  >
+                    <h4 style={{ color: "var(--text-primary)", marginBottom: "0.5rem" }}>{opt.title}</h4>
+                    <p style={{ fontSize: "0.9rem", color: "var(--text-secondary)", marginBottom: "0.5rem" }}><strong>Aim:</strong> {opt.aim}</p>
+                    <p style={{ fontSize: "0.9rem", color: "var(--text-secondary)", marginBottom: "0.5rem" }}><strong>Supporting Facts:</strong> {opt.supporting_facts}</p>
+                    <p style={{ fontSize: "0.9rem", color: "var(--text-secondary)" }}>{opt.description}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ marginTop: "2rem" }}>
+                <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: "bold" }}>Custom Strategy / Modifications</label>
+                <textarea 
+                  value={customStrategyText}
+                  onChange={(e) => setCustomStrategyText(e.target.value)}
+                  placeholder="Tweak the selected strategy or type your own custom strategy here..."
+                  style={{ width: "100%", height: "100px", padding: "1rem", borderRadius: "4px", backgroundColor: "var(--bg-color)", color: "var(--text-primary)", border: "1px solid var(--border-color)", resize: "vertical" }}
+                />
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Step 5: Draft Writ Petition */}
+      {strategyOptions.length > 0 && (
+        <section className="card no-print" style={{ textAlign: "center", padding: "3rem", marginBottom: "2rem", border: "2px solid #8b5cf6" }}>
+          <h2 style={{ marginBottom: "1.5rem" }}>Step 5: Draft Writ Petition</h2>
+          <p style={{ color: "var(--text-secondary)", marginBottom: "1.5rem", fontSize: "1rem" }}>
+            The AI will now use all generated facts, regulations, precedents, and your selected strategy to draft the formal petition sections.
+          </p>
+
+          <button 
+            onClick={handleDraftWrit} 
+            disabled={loadingDraft || (selectedStrategyIndex === null && !customStrategyText.trim())}
+            className="btn" 
+            style={{ 
+              width: "100%", 
+              fontSize: "1.2rem", 
+              padding: "1rem",
+              backgroundColor: "#8b5cf6",
+              color: "#fff",
+              opacity: (loadingDraft || (selectedStrategyIndex === null && !customStrategyText.trim())) ? 0.5 : 1
+            }}
+          >
+            {loadingDraft ? "Drafting Writ Petition..." : "Draft Writ Petition"}
+          </button>
+        </section>
+      )}
+
+      {/* Draft Results */}
+      {draftResults && (
+        <section className="card" style={{ marginBottom: "4rem", borderTop: "4px solid #8b5cf6" }}>
+          <h2 style={{ marginBottom: "2rem", textAlign: "center", color: "#8b5cf6" }}>Drafted Writ Petition</h2>
+          <div style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
+            {[
+              { title: "Statement of Facts", content: draftResults.statement_of_facts },
+              { title: "Grounds for Challenge", content: draftResults.grounds_for_challenge },
+              { title: "The Prayer", content: draftResults.the_prayer }
+            ].map((section, index) => (
+              <div key={index} style={{ padding: "1.5rem", border: "1px solid var(--border-color)", borderRadius: "8px", backgroundColor: "rgba(255,255,255,0.02)" }}>
+                <h3 style={{ marginBottom: "1rem", color: "#8b5cf6" }}>{section.title}</h3>
+                <div style={{ whiteSpace: "pre-wrap", color: "var(--text-primary)", lineHeight: "1.6" }}>
+                  {section.content}
+                </div>
+              </div>
+            ))}
           </div>
         </section>
       )}

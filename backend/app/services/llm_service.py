@@ -5,7 +5,7 @@ import logging
 from fastapi import HTTPException
 from app.core.config import settings
 import json
-from app.models.schemas import InitialAnalysisResult, PrecedentAnalysisResult, StrategyAnalysisResult
+from app.models.schemas import InitialAnalysisResult, PrecedentAnalysisResult, StrategyAnalysisResult, StrategyOptionsResult, StrategyOption, DraftWritResult
 
 # Initialize OpenAI
 if not settings.OPENAI_API_KEY:
@@ -121,6 +121,49 @@ Strategy Outline Context:
 {phase_6}
 """
 
+PROMPT_STRATEGY_OPTIONS = """
+Based on the case summary and vulnerability analysis, generate 3 to 4 distinct legal strategies that a lawyer representing {representing_party} could employ in a Writ Petition. 
+Include a mix of aggressive and defensive strategies where applicable. For each strategy, state clearly what it aims to achieve, and identify the specific facts from the case that support it.
+Return ONLY a valid JSON list of objects. Each object must have exactly these keys: "title", "aim", "supporting_facts", "description".
+Do not include any markdown formatting outside the JSON array.
+
+Case Summary:
+{phase_3}
+Regulatory Context:
+{phase_4}
+Vulnerability Analysis:
+{phase_5}
+"""
+
+PROMPT_DRAFT_FACTS = """
+Draft a formal 'Statement of Facts' section for a Writ Petition filed on behalf of {representing_party}. 
+Use the narrative context to establish a chronological, professional, and clear history of the case leading up to the grievance. Focus on objective facts. Do not argue the law in this section.
+
+Narrative Context:
+{phase_3}
+"""
+
+PROMPT_DRAFT_GROUNDS = """
+Draft the 'Grounds for Challenge' section for a Writ Petition filed on behalf of {representing_party}. This is the legal backbone of the petition. 
+Strictly base your arguments on the following chosen legal strategy: {selected_strategy_text}
+Incorporate the regulatory context, adversarial strategy context, and precedent matching context to explain why the opposing party's action or inaction is illegal, arbitrary, or unconstitutional.
+
+Regulatory Context:
+{phase_4}
+
+Adversarial Strategy Context:
+{phase_6}
+
+Precedents Context:
+{phase_7}
+"""
+
+PROMPT_DRAFT_PRAYER = """
+Draft 'The Prayer' section for a Writ Petition filed on behalf of {representing_party}. 
+This is the specific relief sought from the High Court. Base the requested relief on the following chosen strategy: {selected_strategy_text}.
+List exactly what the court should order (e.g., issuing a specific writ like Mandamus or Certiorari, quashing an unlawful order, directing an authority to perform its duty).
+"""
+
 async def generate_response(prompt: str, provider: str, temperature: float = 0.2) -> str:
     try:
         if provider == "google":
@@ -217,3 +260,45 @@ async def summarize_precedent_document(document_text: str, provider: str = "open
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Precedent Summarization failed: {str(e)}")
+
+async def run_strategy_options(phase_3: str, phase_4: str, phase_5: str, representing_party: str, provider: str = "openai") -> StrategyOptionsResult:
+    try:
+        prompt = PROMPT_STRATEGY_OPTIONS.format(phase_3=phase_3, phase_4=phase_4, phase_5=phase_5, representing_party=representing_party)
+        json_str = await generate_response(prompt, provider, 0.3)
+        
+        cleaned_str = json_str.strip()
+        if cleaned_str.startswith("```json"):
+            cleaned_str = cleaned_str[7:]
+        if cleaned_str.startswith("```"):
+            cleaned_str = cleaned_str[3:]
+        if cleaned_str.endswith("```"):
+            cleaned_str = cleaned_str[:-3]
+        
+        options_data = json.loads(cleaned_str.strip())
+        if not isinstance(options_data, list):
+            options_data = [options_data] # fallback if it returned a single object
+            
+        options = [StrategyOption(**opt) for opt in options_data]
+        return StrategyOptionsResult(options=options)
+    except Exception as e:
+        logging.error(f"Failed to generate strategy options: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate strategy options: {str(e)}")
+
+async def run_draft_writ_petition(phase_3: str, phase_4: str, phase_6: str, phase_7: str, representing_party: str, selected_strategy_text: str, provider: str = "openai") -> DraftWritResult:
+    try:
+        facts_prompt = PROMPT_DRAFT_FACTS.format(representing_party=representing_party, phase_3=phase_3)
+        grounds_prompt = PROMPT_DRAFT_GROUNDS.format(representing_party=representing_party, selected_strategy_text=selected_strategy_text, phase_4=phase_4, phase_6=phase_6, phase_7=phase_7)
+        prayer_prompt = PROMPT_DRAFT_PRAYER.format(representing_party=representing_party, selected_strategy_text=selected_strategy_text)
+
+        statement_of_facts = await generate_response(facts_prompt, provider, 0.2)
+        grounds_for_challenge = await generate_response(grounds_prompt, provider, 0.3)
+        the_prayer = await generate_response(prayer_prompt, provider, 0.2)
+
+        return DraftWritResult(
+            statement_of_facts=statement_of_facts.strip(),
+            grounds_for_challenge=grounds_for_challenge.strip(),
+            the_prayer=the_prayer.strip()
+        )
+    except Exception as e:
+        logging.error(f"Failed to draft writ petition: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to draft writ petition: {str(e)}")
