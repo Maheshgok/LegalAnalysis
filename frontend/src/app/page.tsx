@@ -14,6 +14,13 @@ export default function Home() {
   // State for Caching
   const [extractedText, setExtractedText] = useState<string | null>(null);
   
+  // Phase 1 States
+  const [phase1Results, setPhase1Results] = useState<any>(null);
+  const [disputes, setDisputes] = useState<any[]>([]);
+  const [selectedDisputeIndex, setSelectedDisputeIndex] = useState<number | null>(null);
+  const [customDisputeText, setCustomDisputeText] = useState("");
+  const [loadingPhase1, setLoadingPhase1] = useState(false);
+  
   const [initialResults, setInitialResults] = useState<any>(null);
   const [strategyResults, setStrategyResults] = useState<any>(null);
   const [finalResults, setFinalResults] = useState<any>(null);
@@ -45,6 +52,10 @@ export default function Home() {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       setFiles(Array.from(e.target.files));
+      setPhase1Results(null);
+      setDisputes([]);
+      setSelectedDisputeIndex(null);
+      setCustomDisputeText("");
       setInitialResults(null);
       setStrategyResults(null);
       setFinalResults(null);
@@ -62,14 +73,18 @@ export default function Home() {
     setProvider(e.target.value);
   };
 
-  const handleInitialAnalyze = async () => {
+  const handlePhase1Analyze = async () => {
     if (files.length === 0) {
       setError("Please select at least one document to analyze.");
       return;
     }
     
-    setLoadingInitial(true);
+    setLoadingPhase1(true);
     setError(null);
+    setPhase1Results(null);
+    setDisputes([]);
+    setSelectedDisputeIndex(null);
+    setCustomDisputeText("");
     setInitialResults(null);
     setStrategyResults(null);
     setFinalResults(null);
@@ -99,14 +114,66 @@ export default function Home() {
         setExtractedText(currentExtractedText);
       }
 
-      // Step 2: Run Initial Analysis
+      // Step 2: Run Phase 1 Analysis
+      const response = await fetch(`${API_BASE_URL}/api/analysis/phase-1`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          document_text: currentExtractedText,
+          provider: provider
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok && data.status === "success") {
+        setPhase1Results(data.data.phase_1);
+        setDisputes(data.data.disputes || []);
+      } else {
+        throw new Error(data.detail || data.message || "An error occurred during phase 1 analysis.");
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to connect to the backend server. Make sure it is running.");
+    } finally {
+      setLoadingPhase1(false);
+    }
+  };
+
+  const handleInitialAnalyze = async () => {
+    if (!phase1Results) {
+      setError("Please extract facts first.");
+      return;
+    }
+    if (selectedDisputeIndex === null && !customDisputeText.trim()) {
+      setError("Please select a dispute or provide a custom dispute description.");
+      return;
+    }
+    
+    setLoadingInitial(true);
+    setError(null);
+    setInitialResults(null);
+    setStrategyResults(null);
+    setFinalResults(null);
+    
+    let finalDispute = "";
+    if (selectedDisputeIndex !== null) {
+      const opt = disputes[selectedDisputeIndex];
+      finalDispute += `[Dispute Title]: ${opt.title}\n[Summary]: ${opt.summary}\n\n`;
+    }
+    if (customDisputeText.trim()) {
+      finalDispute += `[Custom Dispute Additions]:\n${customDisputeText}\n`;
+    }
+    
+    try {
       const analyzeResponse = await fetch(`${API_BASE_URL}/api/analysis/initial`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          document_text: currentExtractedText,
+          document_text: extractedText,
+          phase_1: phase1Results,
+          selected_dispute: finalDispute,
           provider: provider
         }),
       });
@@ -347,8 +414,11 @@ export default function Home() {
     const footer = "</body></html>";
     let content = "<h1>Legal Case Strategist Analysis</h1>";
     
+    if (phase1Results) {
+      content += "<h2>Phase 1: Raw Fact Extraction</h2><p>" + phase1Results.replace(/\n/g, "<br>") + "</p>";
+    }
+    
     if (initialResults) {
-      content += "<h2>Phase 1: Raw Fact Extraction</h2><p>" + initialResults.phase_1.replace(/\n/g, "<br>") + "</p>";
       content += "<h2>Phase 2: Narrative Mapping</h2><p>" + initialResults.phase_2.replace(/\n/g, "<br>") + "</p>";
       content += "<h2>Phase 3: Objective Formalization</h2><p>" + initialResults.phase_3.replace(/\n/g, "<br>") + "</p>";
       content += "<h2>Phase 4: Regulatory Mapping</h2><p>" + initialResults.phase_4.replace(/\n/g, "<br>") + "</p>";
@@ -404,9 +474,9 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Step 1 */}
+      {/* Step 1a */}
       <section className="card no-print" style={{ textAlign: "center", padding: "3rem", marginBottom: "2rem" }}>
-        <h2 style={{ marginBottom: "1.5rem" }}>Step 1: Upload Exhibits & Facts Analysis</h2>
+        <h2 style={{ marginBottom: "1.5rem" }}>Step 1a: Upload Exhibits & Extract Facts</h2>
         <input 
           type="file" 
           multiple
@@ -434,33 +504,92 @@ export default function Home() {
         {error && !initialResults && <p style={{ color: "#ef4444", margin: "1rem 0" }}>{error}</p>}
 
         <button 
-          onClick={handleInitialAnalyze} 
-          disabled={loadingInitial || files.length === 0}
+          onClick={handlePhase1Analyze} 
+          disabled={loadingPhase1 || files.length === 0}
           className="btn" 
           style={{ 
             width: "100%", 
             fontSize: "1.2rem", 
             padding: "1rem",
             marginTop: "2rem",
-            opacity: (loadingInitial || files.length === 0) ? 0.5 : 1
+            opacity: (loadingPhase1 || files.length === 0) ? 0.5 : 1
           }}
         >
-          {loadingInitial ? `Running Fact Extraction...` : `Run Fact Extraction (${provider === 'openai' ? 'OpenAI' : 'Google Gemini'})`}
+          {loadingPhase1 ? `Extracting Facts & Identifying Disputes...` : `Extract Facts & Identify Disputes (${provider === 'openai' ? 'OpenAI' : 'Google Gemini'})`}
         </button>
-        {extractedText && !loadingInitial && (
+        {extractedText && !loadingPhase1 && (
           <p style={{ color: "var(--success)", fontSize: "0.9rem", marginTop: "1rem" }}>
             ✓ OCR Text Cached. Toggling the AI Provider will be instant!
           </p>
         )}
       </section>
 
+      {/* Step 1b: Select Dispute */}
+      {phase1Results && (
+        <section className="card no-print" style={{ padding: "3rem", marginBottom: "2rem", border: "2px solid var(--primary-color)" }}>
+          <h2 style={{ marginBottom: "1.5rem", textAlign: "center" }}>Step 1b: Select a Dispute to Analyze</h2>
+          
+          <div style={{ textAlign: "left", marginBottom: "2rem", padding: "1.5rem", border: "1px solid var(--border-color)", borderRadius: "8px", backgroundColor: "rgba(255,255,255,0.02)" }}>
+            <h3 style={{ marginBottom: "1rem", color: "var(--primary-color)" }}>Raw Fact Extraction</h3>
+            <div style={{ whiteSpace: "pre-wrap", color: "var(--text-primary)", lineHeight: "1.6", maxHeight: "300px", overflowY: "auto", fontSize: "0.9rem", paddingRight: "1rem" }}>
+              {phase1Results}
+            </div>
+          </div>
+          
+          <div style={{ textAlign: "left" }}>
+            <h3 style={{ marginBottom: "1rem", color: "var(--primary-color)" }}>Identified Disputes</h3>
+            {disputes.length === 0 ? (
+              <p style={{ color: "var(--text-secondary)" }}>No specific disputes identified. You can type one below.</p>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "1rem", marginBottom: "2rem" }}>
+                {disputes.map((opt, idx) => (
+                  <div 
+                    key={idx} 
+                    onClick={() => setSelectedDisputeIndex(idx)}
+                    style={{ 
+                      padding: "1.5rem", 
+                      borderRadius: "8px", 
+                      border: selectedDisputeIndex === idx ? "2px solid var(--primary-color)" : "1px solid var(--border-color)", 
+                      backgroundColor: selectedDisputeIndex === idx ? "rgba(59, 130, 246, 0.1)" : "rgba(255,255,255,0.02)",
+                      cursor: "pointer",
+                      transition: "all 0.2s"
+                    }}
+                  >
+                    <h4 style={{ color: "var(--text-primary)", marginBottom: "0.5rem" }}>{opt.title}</h4>
+                    <p style={{ fontSize: "0.9rem", color: "var(--text-secondary)" }}>{opt.summary}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            
+            <div style={{ marginTop: "1rem", marginBottom: "2rem" }}>
+              <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: "bold" }}>Custom Dispute / Modifications</label>
+              <textarea 
+                value={customDisputeText}
+                onChange={(e) => setCustomDisputeText(e.target.value)}
+                placeholder="Modify the selected dispute or type your own custom dispute here to focus the AI's analysis..."
+                style={{ width: "100%", height: "80px", padding: "1rem", borderRadius: "4px", backgroundColor: "var(--bg-color)", color: "var(--text-primary)", border: "1px solid var(--border-color)", resize: "vertical" }}
+              />
+            </div>
+          </div>
+
+          <button 
+            onClick={handleInitialAnalyze} 
+            disabled={loadingInitial || (selectedDisputeIndex === null && !customDisputeText.trim())}
+            className="btn" 
+            style={{ width: "100%", fontSize: "1.2rem", padding: "1rem", opacity: (loadingInitial || (selectedDisputeIndex === null && !customDisputeText.trim())) ? 0.5 : 1 }}
+          >
+            {loadingInitial ? `Analyzing Selected Dispute...` : `Analyze Selected Dispute`}
+          </button>
+        </section>
+      )}
+
       {/* Initial Results */}
       {initialResults && (
         <section className="card" style={{ marginBottom: "2rem" }}>
-          <h2 style={{ marginBottom: "2rem", textAlign: "center", color: "var(--primary-color)" }}>Fact Analysis Complete ({provider.toUpperCase()})</h2>
+          <h2 style={{ marginBottom: "2rem", textAlign: "center", color: "var(--primary-color)" }}>Dispute Analysis Complete ({provider.toUpperCase()})</h2>
           <div style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
             {[
-              { title: "Phase 1: Raw Fact Extraction", content: initialResults.phase_1 },
               { title: "Phase 2: Narrative Mapping", content: initialResults.phase_2 },
               { title: "Phase 3: Objective Formalization", content: initialResults.phase_3 },
               { title: "Phase 4: Regulatory Mapping", content: initialResults.phase_4 },

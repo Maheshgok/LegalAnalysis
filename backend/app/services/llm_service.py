@@ -5,7 +5,7 @@ import logging
 from fastapi import HTTPException
 from app.core.config import settings
 import json
-from app.models.schemas import InitialAnalysisResult, PrecedentAnalysisResult, StrategyAnalysisResult, StrategyOptionsResult, StrategyOption, DraftWritResult
+from app.models.schemas import InitialAnalysisResult, PrecedentAnalysisResult, StrategyAnalysisResult, StrategyOptionsResult, StrategyOption, DraftWritResult, Phase1Result, DisputeOption
 
 # Initialize OpenAI
 if not settings.OPENAI_API_KEY:
@@ -39,8 +39,19 @@ Document Context:
 {document_text}
 """
 
+PROMPT_IDENTIFY_DISPUTES = """
+Review the extracted facts. Identify and extract all distinct legal disputes or issues present.
+Return ONLY a valid JSON list of objects. Each object must have exactly these keys: "title" (short title of the dispute), "summary" (a brief 1-2 sentence description of what this dispute is about).
+Do not include any markdown formatting outside the JSON array.
+
+Extracted Facts:
+{phase_1}
+"""
+
 PROMPT_PHASE_2 = """
 Based on the extracted facts, tell the story of this dispute. Clearly separate the facts into three buckets: 1) What both parties agree on, 2) The core contentions (what they are fighting over), and 3) The current status quo or latest ruling.
+
+STRICT CONSTRAINT: Only analyze and tell the story for the following SPECIFIC dispute: {selected_dispute}. Ignore all other disputes and facts.
 
 Raw Facts Context:
 {phase_1}
@@ -63,9 +74,9 @@ Case Summary Context:
 """
 
 PROMPT_EXTRACT_PARTIES = """
-Analyze the provided legal document and identify the primary opposing legal entities (litigants, disputing parties) involved in the core dispute.
+Analyze the provided legal document and identify the primary opposing legal entities (litigants, disputing parties) involved in the following specific dispute: {selected_dispute}.
 Focus on identifying who is bringing the action (e.g., Petitioner, Appellant, Claimant, Contractor) and who is defending or opposing it (e.g., Respondent, Defendant, Authority, Employer).
-DO NOT just list every named entity or organization mentioned in the text.
+DO NOT just list every named entity or organization mentioned in the text. Ignore entities involved only in other disputes.
 If a party is a government body acting through a specific officer or department (e.g., "Government of Maharashtra, Department of Revenue, Tehsildar - Khandala"), group them together as a single unified party string.
 
 Logically group the identified entities into the two opposing sides. Any ambiguous entities or distinct third parties should be placed into an unassigned pool.
@@ -191,14 +202,37 @@ async def generate_response(prompt: str, provider: str, temperature: float = 0.2
         logging.error(f"LLM Generation failed for provider '{provider}': {e}")
         raise HTTPException(status_code=502, detail=f"AI Provider ({provider}) failed to generate a response: {e}")
 
-async def run_initial_analysis(document_text: str, provider: str = "openai") -> InitialAnalysisResult:
+async def run_phase_1(document_text: str, provider: str = "openai") -> Phase1Result:
     try:
         phase_1 = await generate_response(PROMPT_PHASE_1.format(document_text=document_text), provider, 0.2)
-        phase_2 = await generate_response(PROMPT_PHASE_2.format(phase_1=phase_1), provider, 0.2)
+        
+        json_str = await generate_response(PROMPT_IDENTIFY_DISPUTES.format(phase_1=phase_1), provider, 0.2)
+        
+        cleaned_str = json_str.strip()
+        if cleaned_str.startswith("```json"):
+            cleaned_str = cleaned_str[7:]
+        if cleaned_str.startswith("```"):
+            cleaned_str = cleaned_str[3:]
+        if cleaned_str.endswith("```"):
+            cleaned_str = cleaned_str[:-3]
+        
+        disputes_data = json.loads(cleaned_str.strip())
+        if not isinstance(disputes_data, list):
+            disputes_data = [disputes_data]
+            
+        disputes = [DisputeOption(**opt) for opt in disputes_data]
+        return Phase1Result(phase_1=phase_1, disputes=disputes)
+    except Exception as e:
+        logging.error(f"Failed to run Phase 1: {e}")
+        raise HTTPException(status_code=500, detail=f"Phase 1 failed: {str(e)}")
+
+async def run_initial_analysis(document_text: str, phase_1: str, selected_dispute: str, provider: str = "openai") -> InitialAnalysisResult:
+    try:
+        phase_2 = await generate_response(PROMPT_PHASE_2.format(phase_1=phase_1, selected_dispute=selected_dispute), provider, 0.2)
         phase_3 = await generate_response(PROMPT_PHASE_3.format(phase_2=phase_2), provider, 0.2)
         phase_4 = await generate_response(PROMPT_PHASE_4.format(phase_3=phase_3), provider, 0.2)
         
-        parties_json_str = await generate_response(PROMPT_EXTRACT_PARTIES.format(document_text=document_text), provider, 0.1)
+        parties_json_str = await generate_response(PROMPT_EXTRACT_PARTIES.format(document_text=document_text, selected_dispute=selected_dispute), provider, 0.1)
         
         suggested_party_a = []
         suggested_party_b = []
@@ -223,7 +257,7 @@ async def run_initial_analysis(document_text: str, provider: str = "openai") -> 
             suggested_party_a=suggested_party_a,
             suggested_party_b=suggested_party_b,
             unassigned_entities=unassigned_entities,
-            phase_1=phase_1, phase_2=phase_2, phase_3=phase_3, phase_4=phase_4
+            phase_2=phase_2, phase_3=phase_3, phase_4=phase_4
         )
     except HTTPException:
         raise

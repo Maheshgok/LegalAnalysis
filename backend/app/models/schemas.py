@@ -5,10 +5,21 @@ class InitialAnalysisResult(BaseModel):
     suggested_party_a: List[str] = Field(default=[], description="List of parties suggested for side A (e.g., Petitioners)")
     suggested_party_b: List[str] = Field(default=[], description="List of parties suggested for side B (e.g., Respondents)")
     unassigned_entities: List[str] = Field(default=[], description="List of unassigned or ambiguous entities")
-    phase_1: str = Field(..., description="Raw Fact Extraction")
     phase_2: str = Field(..., description="Narrative Mapping")
     phase_3: str = Field(..., description="Objective Formalization")
     phase_4: str = Field(..., description="Regulatory Mapping")
+
+class DisputeOption(BaseModel):
+    title: str = Field(..., description="Short title of the dispute")
+    summary: str = Field(..., description="Brief summary of the dispute and its core contention")
+
+class Phase1Request(BaseModel):
+    document_text: str = Field(..., description="The combined text extracted from all uploaded documents")
+    provider: str = Field("openai", description="The AI provider to use ('openai' or 'google')")
+
+class Phase1Result(BaseModel):
+    phase_1: str = Field(..., description="Raw Fact Extraction")
+    disputes: List[DisputeOption] = Field(..., description="List of identified disputes in the text")
 
 class StrategyAnalysisRequest(BaseModel):
     phase_3: str = Field(..., description="Objective Formalization")
@@ -27,6 +38,8 @@ class PrecedentAnalysisResult(BaseModel):
 
 class InitialAnalysisRequest(BaseModel):
     document_text: str = Field(..., description="The combined text extracted from all uploaded documents")
+    phase_1: str = Field(..., description="The extracted facts from Phase 1")
+    selected_dispute: str = Field(..., description="The selected dispute to focus the analysis on")
     provider: str = Field("openai", description="The AI provider to use ('openai' or 'google')")
 
 class PrecedentRequest(BaseModel):

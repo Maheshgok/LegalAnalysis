@@ -1,19 +1,33 @@
 from fastapi import APIRouter, HTTPException
 import logging
-from app.models.schemas import InitialAnalysisRequest, PrecedentRequest, StrategyAnalysisRequest, StrategyOptionsRequest, DraftWritRequest
-from app.services.llm_service import run_initial_analysis, run_precedent_analysis, run_strategy_analysis, run_strategy_options, run_draft_writ_petition
+from app.models.schemas import InitialAnalysisRequest, PrecedentRequest, StrategyAnalysisRequest, StrategyOptionsRequest, DraftWritRequest, Phase1Request
+from app.services.llm_service import run_initial_analysis, run_precedent_analysis, run_strategy_analysis, run_strategy_options, run_draft_writ_petition, run_phase_1
 
 router = APIRouter()
 
-@router.post("/initial")
-async def analyze_initial(request: InitialAnalysisRequest):
+@router.post("/phase-1")
+async def analyze_phase_1(request: Phase1Request):
     if not request.document_text.strip():
         raise HTTPException(status_code=400, detail="Document text cannot be empty.")
+        
+    try:
+        result = await run_phase_1(request.document_text, request.provider)
+        return {"status": "success", "data": result.model_dump()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Phase 1 Analysis failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Phase 1 Analysis encountered an error: {str(e)}")
+
+@router.post("/initial")
+async def analyze_initial(request: InitialAnalysisRequest):
+    if not request.document_text.strip() or not request.phase_1.strip() or not request.selected_dispute.strip():
+        raise HTTPException(status_code=400, detail="Document text, phase_1, and selected_dispute cannot be empty.")
     if request.provider not in ["openai", "google"]:
         raise HTTPException(status_code=400, detail="Invalid provider. Must be 'openai' or 'google'.")
         
     try:
-        result = await run_initial_analysis(request.document_text, request.provider)
+        result = await run_initial_analysis(request.document_text, request.phase_1, request.selected_dispute, request.provider)
         return {"status": "success", "data": result.model_dump()}
     except HTTPException:
         raise
