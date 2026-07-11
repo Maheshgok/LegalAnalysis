@@ -47,7 +47,7 @@ export default function Home() {
   
   const [error, setError] = useState<string | null>(null);
 
-  const API_BASE_URL = "https://wp-res-backend-812016027146.us-central1.run.app";
+  const API_BASE_URL = "https://wp-res-backend-bhcetby62q-el.a.run.app";
   
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
